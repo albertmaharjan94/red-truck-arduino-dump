@@ -1,118 +1,133 @@
 #define power_pin 6
 #define reverse_relay 2
-#define led_relay 5
+#define steer_relay1 3
+#define steer_relay2 4
 
-#define ultra_trig_1 9
-#define ultra_echo_1 10
-#define ultra_trig_2 11
-#define ultra_echo_2 12
+// steering analog
+#define steer A2
 
 
 int voltage_bias = 0;
-
 int stop_voltage = 0.83 * 51;
 
 // initial forward to max threshold
-int min_forward = 1.31 * 51;
-int max_forward = 1.53 * 51;
+int min_forward = 1.59 * 51;
+int max_forward = 1.69 * 51;
 
 // initial backward to max threshold
-int min_backward = 1.60 * 51;
-int max_backward = 2.15 * 51;
+int min_backward = 1.99 * 51;
+int max_backward = 2.49 * 51;
 
-int voltage = 43;
+// initial voltage speed
+int voltage = stop_voltage;
 
-float delay_threshold = 12.5;
-
-bool drive = false;
-bool flag = false;
-// initial stop stage
 String state = "STOP";
 
-int max_ultrasonic = 10;
+int min_pot = 385 ;
+int max_pot = 690 ;
+int degree = 0;
+
+
+int min_max_bias = 10;
+bool goesLeft = false;
+bool goesRight = false;
+
+
+int delay_threshold = 2.5;
+// function init
+int getValue(String data, char separator, int index);
+
 
 void setup() {
-  // put your setup code here, to run once:
+  //  power pin
   pinMode(power_pin, OUTPUT);
-
+  // reverse for power
   pinMode(reverse_relay, OUTPUT);
 
-  //  ultrasonic
-  pinMode(ultra_trig_1, OUTPUT);
-  pinMode(ultra_echo_1, INPUT);
-  pinMode(ultra_trig_2, OUTPUT);
-  pinMode(ultra_echo_2, INPUT);
+  //  forward/reverse motor for steering
+  pinMode(steer_relay1, OUTPUT);
+  pinMode(steer_relay2, OUTPUT);
 
+  //  analog pot
+  pinMode(steer, INPUT);
+
+  // Init to forward relay
   digitalWrite(reverse_relay, HIGH);
-  digitalWrite(led_relay, HIGH);
-  Serial.begin(9600);
+  Serial.begin(115200);
+
+  //  Calibrate to middle degree 30
+  int _tmp_steer = analogRead(steer);
+  int _tmp_degree = map(_tmp_steer, min_pot, max_pot, 0 , 60);
+  Serial.println("Calibrating to mid degree");
+  //  if (_tmp_degree < 30){
+  //    while(_tmp_degree == 30){
+  //       _tmp_degree += 1;
+  //       digitalWrite(steer_relay2, LOW);
+  //       digitalWrite(steer_relay1, HIGH);
+  //    }
+  //  }else if(_tmp_degree > 30){
+  //    while(_tmp_degree == 30){
+  //       _tmp_degree -= 1;
+  //       digitalWrite(steer_relay1, LOW);
+  //       digitalWrite(steer_relay2, HIGH);
+  //    }
+  //  }
+  degree = _tmp_degree;
+  Serial.println("Back to mid degree");
+
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
+  int steer_pot = analogRead(steer);
+  degree = map(steer_pot, min_pot + min_max_bias, max_pot - min_max_bias, 0 , 60);
 
-  digitalWrite(ultra_trig_1, LOW);
-  delayMicroseconds(2);
-  digitalWrite(ultra_trig_1, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(ultra_trig_1, LOW);
-
-  
-  int duration = pulseIn(ultra_echo_1, HIGH);
-  int distance = (duration * .0343) / 2;
-    
-  digitalWrite(ultra_trig_2, LOW);
-  delayMicroseconds(2);
-  digitalWrite(ultra_trig_2, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(ultra_trig_2, LOW);
-
-  int duration2 = pulseIn(ultra_echo_2, HIGH);
-  int distance2 = (duration2 * .0343) / 2;
-  distance = 100;
-  distance2= 100;
-  if ((distance < max_ultrasonic && distance > 0) || (distance2 < max_ultrasonic && distance2 > 0)) {
-    drive = false;
+  //  steering logic
+  if (goesRight == true &&  steer_pot >= min_pot + min_max_bias) {
+    digitalWrite(steer_relay1, LOW);
+    digitalWrite(steer_relay2, HIGH);
+  } else if (goesLeft == true && steer_pot <= max_pot - min_max_bias) {
+    digitalWrite(steer_relay2, LOW);
+    digitalWrite(steer_relay1, HIGH);
   } else {
-    drive = true;
+    goesRight = false;
+    goesLeft = false;
+    digitalWrite(steer_relay2, LOW);
+    digitalWrite(steer_relay1, LOW);
   }
 
-  if (drive == false) {
-    voltage = stop_voltage;
-    flag = false;
-    Serial.print("Obstacle detected  ");
-  }
-  else {
-    if (state == "FORWARD" && flag == false) {
-      for (int i = min_forward; i <= max_forward; i++) {
-        voltage = i;
-        analogWrite(power_pin, voltage);
-        Serial.print(state); Serial.print("  ");
-        Serial.println(voltage);
-        delay(delay_threshold);
-      }
-    }
-
-    else if (state == "BACKWARD" &&  flag == false) {
-      for (int i = min_backward; i <= max_backward; i++) {
-        voltage = i;
-        analogWrite(power_pin, voltage);
-        Serial.print(state); Serial.print("  ");
-        Serial.println(voltage);
-        delay(delay_threshold);
-      }
-    }
-    flag = true;
-  }
-  
+  Serial.flush();
   if (Serial.available()) {
-    char data = Serial.read();
+    String data = Serial.readStringUntil('\n');
+    //String data = "90#20#0\n";
 
-    if (data == 'w') {
-      if (drive == true) {
+    int _speed = getValue(data, '#', 0);
+    int _steer = getValue(data, '#', 1);
+    int _brake = getValue(data, '#', 2);
+
+    _speed = _speed != -1 ? _speed : stop_voltage;
+    _steer = _steer != -1 ? _steer : 230;
+    _brake = _brake != -1 ? _brake : 0;
+    Serial.print(_speed); Serial.print(" "); Serial.print(_steer); Serial.print(" "); Serial.print(_brake); Serial.println(" ");
+
+    if (_speed >= -100 && _speed <= 100) {
+      if (_speed == 0 ) {
+        if (state == "FORWARD" || state == "BACKWARD") {
+          // decrease speed linearly
+          for (int i = voltage; i >= stop_voltage; i = i - 2) {
+            voltage = i;
+            analogWrite(power_pin, voltage);
+            Serial.print(state); Serial.print("  ");
+            Serial.println(voltage);
+            delay(delay_threshold);
+          }
+        }
+        state = "STOP";
+      }
+
+      if (_speed > 0) {
         if (state == "BACKWARD") {
           // decrease speed linearly
-          for (int i = voltage; i >= stop_voltage; i--) {
+          for (int i = voltage; i >= stop_voltage; i = i - 2) {
             voltage = i;
             analogWrite(power_pin, voltage);
             Serial.print(state); Serial.print("  ");
@@ -120,21 +135,19 @@ void loop() {
             delay(delay_threshold);
           }
         }
+
         // switch relay for forward
         digitalWrite(reverse_relay, HIGH);
-        if (state == "FORWARD") {
-          // increase speed linearly
-          for (int i = min_forward; i <= max_forward; i++) {
-            voltage = i;
-            analogWrite(power_pin, voltage);
-            Serial.print(state); Serial.print("  ");
-            Serial.println(voltage);
-            delay(delay_threshold);
-          }
-        }
         if (state == "BACKWARD" || state == "STOP" ) {
           // increase speed linearly
-          for (int i = min_forward; i <= max_forward; i++) {
+          for (int i = min_forward; i <= max_forward; i = i + 2) {
+            voltage = i;
+            analogWrite(power_pin, voltage);
+            Serial.print(state); Serial.print("  ");
+            Serial.println(voltage);
+            delay(delay_threshold);
+          }
+          for (int i = min_forward; i <= max_forward; i = i + 2) {
             voltage = i;
             analogWrite(power_pin, voltage);
             Serial.print(state); Serial.print("  ");
@@ -142,54 +155,83 @@ void loop() {
             delay(delay_threshold);
           }
         }
+        digitalWrite(reverse_relay, HIGH);
+        state = "FORWARD";
       }
-      digitalWrite(reverse_relay, HIGH);
-      state = "FORWARD";
+      else if (_speed < 0) {
+        if (state == "FORWARD") {
+          // decrease speed linearly
+          for (int i = voltage; i >= stop_voltage; i = i - 2) {
+            voltage = i;
+            analogWrite(power_pin, voltage);
+            Serial.print(state); Serial.print("  ");
+            Serial.println(voltage);
+            delay(delay_threshold);
+          }
+        }
+        // switch relay for backward
+        digitalWrite(reverse_relay, LOW);
+        if (state == "FORWARD" || state == "STOP") {
+          // increase speed linearly
+          for (int i = min_backward; i <= max_backward; i = i + 2) {
+            voltage = i;
+            analogWrite(power_pin, voltage);
+            Serial.print(state); Serial.print("  ");
+            Serial.println(voltage);
+            delay(delay_threshold);
+          }
+
+          for (int i = min_backward; i <= max_backward; i = i + 2) {
+            voltage = i;
+            analogWrite(power_pin, voltage);
+            Serial.print(state); Serial.print("  ");
+            Serial.println(voltage);
+            delay(delay_threshold);
+          }
+        }
+        state = "BACKWARD";
+      }
+
+      if (_steer >= 200 && _speed <= 260) {
+        if (_steer > 230) {
+          degree = map(steer_pot, min_pot + min_max_bias, max_pot - min_max_bias, 0 , 60);
+          if (_steer != degree) {
+            goesLeft = true;
+            goesRight = false;
+          }
+        }
+        else if (_steer < 230) {
+          degree = map(steer_pot, min_pot + min_max_bias, max_pot - min_max_bias, 0 , 60);
+          if (_steer != degree) {
+            goesRight = true;
+            goesLeft = false;
+          }
+
+        } else if (_steer == 230) {
+          goesRight = false;
+          goesLeft = false;
+          digitalWrite(steer_relay2, LOW);
+          digitalWrite(steer_relay1, LOW);
+        }
+      }
     }
-    if (data == 's') {
-      if (state == "FORWARD" || state == "BACKWARD") {
-        // decrease speed linearly
-        for (int i = voltage; i >= stop_voltage; i--) {
-          voltage = i;
-          analogWrite(power_pin, voltage);
-          Serial.print(state); Serial.print("  ");
-          Serial.println(voltage);
-          delay(delay_threshold);
-        }
-      }
-      state = "STOP";
-    }
-    if (data == 'x') {
-      if (state == "FORWARD") {
-        // decrease speed linearly
-        for (int i = voltage; i >= stop_voltage; i--) {
-          voltage = i;
-          analogWrite(power_pin, voltage);
-          Serial.print(state); Serial.print("  ");
-          Serial.println(voltage);
-          delay(delay_threshold);
-        }
-      }
-      // switch relay for backward
-      digitalWrite(reverse_relay, LOW);
-      if (state == "FORWARD" || state == "STOP") {
-        // increase speed linearly
-        for (int i = min_backward; i <= max_backward; i++) {
-          voltage = i;
-          analogWrite(power_pin, voltage);
-          Serial.print(state); Serial.print("  ");
-          Serial.println(voltage);
-          delay(delay_threshold);
-        }
-      }
-      state = "BACKWARD";
+    analogWrite(power_pin, voltage);
+  }
+  delay(delay_threshold);
+}
+
+int getValue(String data, char separator, int index)
+{
+  int found = 0;
+  int strIndex[] = { 0, -1 };
+  int maxIndex = data.length() - 1;
+
+  for (int i = 0; i <= maxIndex && found <= index; i++) {
+    if (data.charAt(i) == separator || i == maxIndex) {
+      found++;
+      strIndex[0] = strIndex[1] + 1;
+      strIndex[1] = (i == maxIndex) ? i + 1 : i;
     }
   }
-
-  // standard debug
-  Serial.print("Distance: "); Serial.print(distance); Serial.print("  ");
-  Serial.print("Distance2: "); Serial.print(distance2); Serial.print("  ");
-  Serial.print("State: "); Serial.print(state); Serial.print("  ");
-  Serial.print("Voltage: "); Serial.println(voltage);
-  analogWrite(power_pin, voltage);
+  return found > index ? data.substring(strIndex[0], strIndex[1]).toInt() : -1;
 }
